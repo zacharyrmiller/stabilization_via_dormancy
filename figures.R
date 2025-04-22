@@ -65,7 +65,7 @@ glv_dormancy <- function(t, x, parameters) {
 ### Common forms of density-dependence (with arbitrary parameterizations)
 
 logistic_map <- function(x){
-  1 - x
+  pmax(1 - x, 0)
 }
 
 ricker_map <- function(x){
@@ -98,23 +98,24 @@ pa <- df_models %>%
   ggplot() + 
   aes(x = N, y = growth_rate, group = model, color = model) +
   geom_line(size = 1.2) + 
-  annotate("text", x = c(0.3, 0.95, 0.95, 0.4), y = c(0.6, 0.7, 2.5, 2.4), 
+  annotate("text", x = c(0.25, 0.98, 1.05, 0.45), y = c(0.6, 0.7, 2.5, 2.4), 
            label = c("Hassell", "Logistic", "Maynard-Smith", "Ricker"),
            color = brewer.pal(4, "Dark2"),
-           size = 4) + 
+           size = 5) + 
   xlab(expression(N[t])) + ylab(expression(f(N[t]))) + 
-  scale_x_continuous(expand = c(0, 0.01)) + 
+  scale_x_continuous(expand = c(0, 0.01), breaks = c(0, 0.4, 0.8, 1.2)) + 
   scale_y_continuous(expand = c(0, 0.05), limits = c(0, 3)) + 
   scale_color_manual(values = brewer.pal(4, "Dark2")) + 
   theme_classic() + 
   theme(legend.position = "none",
-        axis.title = element_text(size = 14, face = "bold"))
+        axis.title = element_text(size = 14, face = "bold"),
+        axis.line = element_line(linewidth = 1.2))
 
-# ggsave(filename = "./figures/models_conceptual.png", plot = pa, device = "png", 
-#       width = 4, height = 3, units = "in", dpi = 400)
+ggsave(filename = "./figures/models_conceptual.png", plot = pa, device = "png", 
+       width = 4, height = 3, units = "in", dpi = 500)
 
 ## Panel B: Illustration of population map with dormancy (using logistic density-dependence)
-df_alphas <- tibble(N = seq(0, 1.7, by = 0.001), # generate maps for different choices of alpha
+df_alphas <- tibble(N = seq(0, 1.5, by = 0.001), # generate maps for different choices of alpha
                     a_1 = N * r * logistic_map(N),
                     a_0.9 = 0.9 * N * r * logistic_map(0.9 * N) + (1 - 0.9) * (1 - 0.1) * N,
                     a_0.7 = 0.7 * N * r * logistic_map(0.7 * N) + (1 - 0.7) * (1 - 0.1) * N,
@@ -133,15 +134,16 @@ pb <- df_alphas %>%
            parse = TRUE,
            color = colorRampPalette(c("#F2C9AA", "#D95F02"))(4)) + # match scale_color palette (below)
   xlab(expression(N[t])) + ylab(expression(N[t+1])) + 
-  scale_x_continuous(expand = c(0, 0)) + 
+  scale_x_continuous(expand = c(0, 0), breaks = c(0, 0.5, 1, 1.5)) + 
   scale_y_continuous(expand = c(0, 0.01), limits = c(0, 1)) + 
   scale_color_manual(values = colorRampPalette(c("#F2C9AA", "#D95F02"))(4)) +
   theme_classic() + 
   theme(legend.position = "none",
-        axis.title=element_text(size = 14, face = "bold"))
+        axis.title = element_text(size = 14, face = "bold"),
+        axis.line = element_line(linewidth = 1.2))
 
-# ggsave(filename = "./figures/alphas_conceptual.png", plot = pb, device = "png", 
-#       width = 4, height = 3, units = "in", dpi = 400)
+ggsave(filename = "./figures/alphas_conceptual.png", plot = pb, device = "png", 
+       width = 4, height = 3, units = "in", dpi = 500)
 
 
 ### Logistic model bifurcation diagram (Fig. 2)
@@ -173,16 +175,15 @@ m <- 0.01 # fix m at a small value
 df <- df %>% 
   mutate(r_eff = a * r + (1 - a) * (1 - m), # calculate r_eff (Eq. 3)
          dyn = ifelse(r_eff < 1, 0, # classify dynamics using known bifurcation points for the logistic map (see e.g. Devenay 1986/2019)
-                      ifelse(r_eff < 3, 1,
+                      ifelse(r_eff < 3, 1, # 0 denotes extinction, Inf denotes chaos, otherwise numbers denote the periodicity
                              ifelse(r_eff < 3.4495, 2,
                                     ifelse(r_eff < 3.544, 4,
-                                           ifelse(r_eff < 3.56995, 8,
-                                                  ifelse(r_eff <= 4, Inf, 0)))))))
+                                           ifelse(r_eff < 3.56995, 8, Inf))))))
 
 ## Panel A: Plot standard bifurcation diagram
 
 pa <- bif_df %>% 
-  left_join(., df %>% filter(a == 1), by = "r") %>% # join data frames (to color by qualitative dynaimcs)
+  left_join(., df %>% filter(a == 1), by = "r") %>% # join data frames (to color by qualitative dynamics)
   filter(r >= 1) %>% # only plot r values where the population can grow
   ggplot() + 
   aes(x = r, y = values, color = as.factor(dyn)) + 
@@ -227,23 +228,28 @@ pb <- df %>%
 p <- ggarrange(plotlist = list(pa, pb), nrow = 2, heights = c(0.5, 1), 
           labels = "AUTO", font.label = list(face = "plain"))
 
-# ggsave(filename = "./figures/bifurcation_diagram.png", plot = p, device = "png", 
-#      width = 4.5, height = 6, units = "in", dpi = 400)
+ggsave(filename = "./figures/bifurcation_diagram.png", plot = p, device = "png", 
+     width = 4.5, height = 6, units = "in", dpi = 400)
 
 
 ### Mutual invasion time series (Fig. 3)
 
-## Main panel: invasion by high-dormancy ecotype
+all_ts <- tibble(t = numeric(), type = numeric(), value = numeric(),
+                 inv_a = numeric(), IC = character())
+
+# global parameters
+r_res <- 3.8
+r_inv <- 3.8
+m <- 0.05
+
+t_est <- 50 # iterate resident dynamics for t_est steps so that invader enters with resident at steady state
+t_max <- 200 # number of time steps for invasion time series
+
+## Panel TL
 
 # set parameters (discussed in text)
-r_res <- 3.9
-r_inv <- 3.8
 a_res <- 1
 a_inv <- 0.7
-m <- 0.05
-
-t_est <- 50 # iterate resident dynamics for t_est steps so that invader enters with resident at steady state
-t_max <- 175 # number of time steps for invasion time series
 
 # iterate resident dynamics to reach steady state
 establish_res <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
@@ -254,30 +260,24 @@ establish_res <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a
 introduce_inv <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
                                            x1_init = max(tail(establish_res, 2)$value), 
                                            x2_init = 0.01, t_max = t_max)
-ts <- introduce_inv
 
-p_main <- ts %>% 
-  ggplot() + 
-  aes(x = t, y = value, group = type, color = type) + 
-  geom_line() + 
-  scale_y_log10() + 
-  scale_color_manual(values = c(viridis_pal[10],
-                     viridis_pal[4])) + 
-  xlab("Time") + ylab("Population size") + 
-  theme_classic() + 
-  theme(legend.position = "none")
+ts <- introduce_inv %>% mutate(type = ifelse(type == "x1", 2, 1),
+                               inv_a = min(a_res, a_inv), IC = "No-dormancy resident")
+all_ts <- all_ts %>% add_row(ts)
 
-## Inset panel: Invasion by no-dormancy ecotype
+# for inset panel
+long_ts <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
+                                           x1_init = 0.1, 
+                                           x2_init = 0.1, t_max = 1000)
 
-# set parameters (reversed from main panel)
-r_res <- 3.8
-r_inv <- 3.9
+long_ts <- long_ts %>% mutate(type = ifelse(type == "x1", 2, 1),
+                              inv_a = min(a_res, a_inv), IC = "No-dormancy resident")
+
+## Panel TR
+
+# set parameters (discussed in text)
 a_res <- 0.7
 a_inv <- 1
-m <- 0.05
-
-t_est <- 50 # iterate resident dynamics for t_est steps so that invader enters with resident at steady state
-t_max <- 100# number of time steps for invasion time series
 
 # iterate resident dynamics to reach steady state
 establish_res <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
@@ -288,28 +288,199 @@ establish_res <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a
 introduce_inv <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
                                            x1_init = max(tail(establish_res, 2)$value), 
                                            x2_init = 0.01, t_max = t_max)
-ts <- introduce_inv
 
-p_inset <- ts %>% 
+ts <- introduce_inv %>% mutate(type = ifelse(type == "x1", 1, 2),
+                               inv_a = min(a_res, a_inv), IC = "Dormancy resident")
+all_ts <- all_ts %>% add_row(ts)
+
+## Panel BL
+
+# set parameters (discussed in text)
+a_res <- 1
+a_inv <- 0.8
+
+# iterate resident dynamics to reach steady state
+establish_res <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
+                                           x1_init = (a_res * r_res + (1 - a_res) * (1 - m) - 1) / (r_res * a_res^2) + 0.01, # start near equilibrium for faster convergence
+                                           x2_init = 0, t_max = t_est)
+
+# iterate dynamics with invader at low initial abundance
+introduce_inv <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
+                                           x1_init = max(tail(establish_res, 2)$value), 
+                                           x2_init = 0.01, t_max = t_max)
+
+ts <- introduce_inv %>% mutate(type = ifelse(type == "x1", 2, 1),
+                               inv_a = min(a_res, a_inv), IC = "No-dormancy resident")
+all_ts <- all_ts %>% add_row(ts)
+
+## Panel BR
+
+# set parameters (discussed in text)
+a_res <- 0.8
+a_inv <- 1
+
+# iterate resident dynamics to reach steady state
+establish_res <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
+                                           x1_init = (a_res * r_res + (1 - a_res) * (1 - m) - 1) / (r_res * a_res^2) + 0.01, # start near equilibrium for faster convergence
+                                           x2_init = 0, t_max = t_est)
+
+# iterate dynamics with invader at low initial abundance
+introduce_inv <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
+                                           x1_init = max(tail(establish_res, 2)$value), 
+                                           x2_init = 0.01, t_max = t_max)
+
+ts <- introduce_inv %>% mutate(type = ifelse(type == "x1", 1, 2),
+                               inv_a = min(a_res, a_inv), IC = "Dormancy resident")
+all_ts <- all_ts %>% add_row(ts)
+
+p <- all_ts %>%
   ggplot() + 
-  aes(x = t, y = value, group = type, color = type) + 
+  aes(x = t, y = value, group = type, color = as.factor(type)) +
   geom_line() + 
+  facet_grid(inv_a~fct_rev(IC),
+             labeller = labeller(inv_a = function(x) paste("\U03B1' =", x))) + 
   scale_y_log10() + 
   scale_color_manual(values = c(viridis_pal[4],
                                 viridis_pal[10])) + 
   xlab("Time") + ylab("Population size") + 
+  coord_cartesian(ylim = c(0.002, 1.1)) +
+  theme_classic() + 
+  theme(legend.position = "none",
+        #strip.text.x = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill = NA, linewidth = 0.75))
+
+p_inset <- long_ts %>%
+  ggplot() + 
+  aes(x = t, y = value, group = type, color = as.factor(type)) + 
+  geom_line() + 
+  scale_y_log10() + 
+  scale_x_continuous(breaks = c(992, 996, 1000)) + 
+  scale_color_manual(values = c(viridis_pal[4],
+                                viridis_pal[10])) + 
+  xlab("Time") + ylab("Population size") + 
+  coord_cartesian(xlim = c(992, 1000), ylim = c(0.06, 1.1)) +
+  theme_classic() + 
+  theme(legend.position = "none",
+        #strip.text.x = element_blank(),
+        axis.text=element_text(size = 8),
+        axis.title = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill = NA, linewidth = 0.75))
+
+p_comb <- ggdraw() +
+  draw_plot(p) +
+  draw_plot(p_inset, height = 0.23, width = 0.23, x = 0.27, y = 0.53)
+
+ggsave(filename = "./figures/invasion.png", plot = p_comb, device = "png", 
+      width = 5, height = 4, units = "in", dpi = 500)
+
+
+### Numerical calculation of IGR with varying alpha and m for several r values
+
+r_vec <- c(3.2, 3.4, 3.6, 3.8, 3.9)
+
+# how many alpha and m values to test
+a_n <- 1000
+r_n <- 1000
+
+a_vec <- seq(0.001, 0.99, length.out = a_n)
+TOL <- 10^-5
+
+t_max <- 1000 # number of timesteps for numerical iteration
+t_inv <- t_max - 400 # timepoint at which to begin calculating IGR (allowing resident to reach steady state)
+
+df <- tibble(a = numeric(), 
+             r = numeric(), 
+             m = numeric(), 
+             var_x = numeric(),
+             IGR = numeric())
+
+for(r in r_vec){
+  
+  # iterate resident dynamics (always using resident with no dormancy)
+  ts <- general_dormancy_dynamics(r1 = r, a1 = 1, m1 = 0, 
+                                  x1_init = (r - 1)/r + 0.01, # start near equilibrium for fast convergence
+                                  x2_init = 0, t_max = t_max)
+  ts <- ts %>% pull(value)
+  ts <- ts[t_inv:t_max] # pull late values (after transient dynamics have elapsed)
+  
+  # find a time point such that net population change is minimized
+  end_pt <- which.min(abs(cumsum(log(r * (1 - ts)))))
+  x <- ts[1:(end_pt)] # extract stationary sequence of time points
+  
+  for(i in 1:length(a_vec)){
+    
+    inv_a <- a_vec[i]
+    
+    print(inv_a)
+    
+    # binary search over m
+    
+    L <- 0
+    R <- 1
+    m <- 0.5
+    IGR <- (1 / length(x)) * sum(log(r * inv_a * (1 - x) + (1 - inv_a) * (1 - m))) 
+    while(abs(IGR) > TOL){
+      
+      if(IGR > 0){
+        L <- m
+      }else{
+        R <- m
+      }
+      
+      m <- (L + R) / 2
+      
+      IGR <- (1 / length(x)) * sum(log(r * inv_a * (1 - x) + (1 - inv_a) * (1 - m))) 
+    }
+    
+    df <- df %>% add_row(a = inv_a, r = r, m = m, var_x = var(x), IGR = IGR)
+  }
+}
+
+p <- df %>% 
+  group_by(r, a) %>% 
+  ggplot() +
+  aes(x = a, y = m, group = r, color = as.factor(r), fill = as.factor(r)) + 
+  geom_ribbon(aes(x = a, ymax = m),ymin = 0, alpha = 0.2) +
+  geom_line(size = 1.2) +
+  scale_color_manual(values = viridis(20)[c(13,15,17,19,20)]) + 
+  scale_fill_manual(values = viridis(20)[c(13,15,17,19,20)]) + 
+  scale_x_continuous(limits = c(0, 1.1), 
+                     breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 0.58), expand = c(0, 0)) + 
+  xlab(expression(Invader~active~fraction~(alpha*"\u{0027}"))) + 
+  ylab("Mortality in dormancy (m)") + 
+  geom_text(data = df %>% filter(a == max(a), r < 3.9), 
+            aes(label = r), x = 1.05, fontface = "bold") + 
+  annotate(geom = "text", x = 1.01, y = 0.555, label = "r = 3.9", 
+           color = viridis(20)[20], fontface = "bold") +
+  # annotate(geom = "label", x = 0.6, y = 0.465, label = "IGR < 1", 
+  #          color = viridis(20)[20], label.size = 2) + 
+  # annotate(geom = "label", x = 0.6, y = 0.465, label = "IGR < 1", 
+  #          color = "black", label.size = NA) + 
+  # annotate(geom = "label", x = 0.8, y = 0.335, label = "IGR > 1", 
+  #          color = viridis(20)[20], label.size = 2) + 
+  # annotate(geom = "label", x = 0.8, y = 0.335, label = "IGR > 1", 
+  #          color = "black", label.size = NA) + 
+  annotate(geom = "text", x = 0.55, y = 0.46, label = "IGR < 1",
+           color = "black") +
+  annotate(geom = "text", x = 0.82, y = 0.34, label = "IGR > 1",
+           color = "black") +
+  annotate("segment", x = 0.77, y = 0.405, xend = 0.81, yend = 0.375, size = 1.1,
+           color = viridis(20)[20], linejoin='mitre',
+           arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
+  annotate("segment", x = 0.63, y = 0.395, xend = 0.59, yend = 0.425, size = 1.1,
+           color = viridis(20)[20], linejoin='mitre',
+           arrow = arrow(type = "closed", length = unit(0.02, "npc"))) +
   theme_classic() + 
   theme(legend.position = "none")
 
-# combine panels
-p <- p_main + annotation_custom(ggplotGrob(p_inset), xmin = 75, xmax = 165, 
-                       ymin = -2.4, ymax = -1.1)
-
-# ggsave(filename = "./figures/invasion.png", plot = p, device = "png", 
-#      width = 6, height = 4, units = "in", dpi = 400)
+ggsave(filename = "./figures/numerical_IGR.png", plot = p, device = "png", 
+       width = 3.5, height = 3, units = "in", dpi = 400)
 
 
-### Pairwise invasibility plots with logistic density-dependence (Fig. 4)                      
+### Pairwise invasibility plots with logistic density-dependence (Fig. 5)                      
 
 # Calculate IGRs for many combinations of resident and invader alpha values.
 # To numerically estimate IGR, iterate resident dynamics for many time steps, then 
@@ -352,7 +523,7 @@ for(r in r_vec){
       
       # find a time point such that net population change is minimized
       end_pt <- which.min(abs(cumsum(log(res_a * r * (1 - res_a * ts) + (1 - res_a) * (1 - m)))))
-      x <- ts[2:(end_pt + 1)] # extract stationary sequence of time points
+      x <- ts[1:(end_pt)] # extract stationary sequence of time points
       
       for(j in 1:length(inv_a_vec)){
         
@@ -378,16 +549,20 @@ p <- df %>%
                filter(max_IGR == min(max_IGR)), 
              aes(xintercept = res_a),
               linetype = "dashed", size = 0.8) +
-  geom_hline(data = . %>% group_by(res_a, r, m) %>% # add a horizontal line for ESS 
-               summarize(max_IGR = max(IGR)) %>%
-               group_by(r, m) %>% 
-               filter(max_IGR == min(max_IGR)), 
-             aes(yintercept = res_a),
-             linetype = "dashed", size = 0.8) +
+  # geom_hline(data = . %>% group_by(res_a, r, m) %>% # add a horizontal line for ESS 
+  #              summarize(max_IGR = max(IGR)) %>%
+  #              group_by(r, m) %>% 
+  #              filter(max_IGR == min(max_IGR)), 
+  #            aes(yintercept = res_a),
+  #            linetype = "dashed", size = 0.8) +
   geom_vline(aes(xintercept = (3 - (1 - m))/(r - (1 - m))), # add a vertical line for bifurcation point
              linetype = "11", color = "red", size = 1) + 
+  geom_point(data = tibble(r = 3.8, m = 0.05, res_a = c(0.999, 0.7), inv_a = c(0.7, 0.995)), 
+             size = 2) + 
+  geom_point(data = tibble(r = 3.8, m = 0.05, res_a = c(0.999, 0.8), inv_a = c(0.8, 0.995)), 
+             pch = 4, size = 2, stroke = 0.8) + 
   annotate(geom = "text", x = 0.6, y = 0.45, label = "\u2013", size = 8) + 
-  annotate(geom = "text", x = 0.45, y = 0.65, label = "+", size = 8) + 
+  annotate(geom = "text", x = 0.45, y = 0.6, label = "+", size = 8) + 
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0)) + 
   scale_fill_manual(values = c(viridis_pal[10],
@@ -395,15 +570,128 @@ p <- df %>%
   facet_grid(m ~ r, 
              labeller = labeller(m = function(x) paste0("m = ", x),
                                  r = function(x) paste0("r = ", x))) + 
+  coord_cartesian(clip = "off") + 
   theme_classic() +
   xlab("Resident active fraction") + ylab("Invader active fraction") + 
-  theme(legend.position = "none")
+  theme(legend.position = "none",
+        strip.background = element_rect(fill=NA))
 
-#ggsave(filename = "./figures/pip.png", plot = p, device = "png", 
-#       width = 5, height = 5, units = "in", dpi = 400)
+ggsave(filename = "./figures/pip.png", plot = p, device = "png", 
+       width = 5, height = 5, units = "in", dpi = 400)
 
 
-### Invasion of simple, chaotic food web by dormancy in continuous-time (Fig. 5, Box 1)
+##### SI figures #####
+
+
+### Mutual invasion with differing r values (Fig. S2)
+
+all_ts <- tibble(t = numeric(), type = numeric(), value = numeric(),
+                 inv_a = numeric(), IC = character())
+
+# global parameters
+m <- 0.05
+
+t_est <- 50 # iterate resident dynamics for t_est steps so that invader enters with resident at steady state
+t_max <- 400 # number of time steps for invasion time series
+
+## Panel TL
+
+# set parameters (discussed in text)
+a_res <- 1
+a_inv <- 0.7
+r_res <- 3.9
+r_inv <- 3.7
+
+# iterate resident dynamics to reach steady state
+establish_res <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
+                                           x1_init = (a_res * r_res + (1 - a_res) * (1 - m) - 1) / (r_res * a_res^2) + 0.01, # start near equilibrium for faster convergence
+                                           x2_init = 0, t_max = t_est)
+
+# iterate dynamics with invader at low initial abundance
+introduce_inv <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
+                                           x1_init = max(tail(establish_res, 2)$value), 
+                                           x2_init = 0.01, t_max = t_max)
+
+ts <- introduce_inv %>% mutate(type = ifelse(type == "x1", 2, 1),
+                               inv_a = min(a_res, a_inv), IC = "No-dormancy resident")
+all_ts <- all_ts %>% add_row(ts)
+
+# for inset plot
+long_ts <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
+                                     x1_init = 0.1, 
+                                     x2_init = 0.1, t_max = 1000)
+
+long_ts <- long_ts %>% mutate(type = ifelse(type == "x1", 2, 1),
+                              inv_a = min(a_res, a_inv), IC = "No-dormancy resident")
+
+## Panel TR
+
+# set parameters (discussed in text)
+a_res <- 0.7
+a_inv <- 1
+r_res <- 3.7
+r_inv <- 3.9
+
+# iterate resident dynamics to reach steady state
+establish_res <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
+                                           x1_init = (a_res * r_res + (1 - a_res) * (1 - m) - 1) / (r_res * a_res^2) + 0.01, # start near equilibrium for faster convergence
+                                           x2_init = 0, t_max = t_est)
+
+# iterate dynamics with invader at low initial abundance
+introduce_inv <- general_dormancy_dynamics(r1 = r_res, r2 = r_inv, a1 = a_res, a2 = a_inv, m1 = m,
+                                           x1_init = max(tail(establish_res, 2)$value), 
+                                           x2_init = 0.01, t_max = t_max)
+
+ts <- introduce_inv %>% mutate(type = ifelse(type == "x1", 1, 2),
+                               inv_a = min(a_res, a_inv), IC = "Dormancy resident")
+all_ts <- all_ts %>% add_row(ts)
+
+
+p <- all_ts %>%
+  ggplot() + 
+  aes(x = t, y = value, group = type, color = as.factor(type)) +
+  geom_line() + 
+  facet_grid(inv_a~fct_rev(IC),
+             labeller = labeller(inv_a = function(x) paste("\U03B1' =", x))) + 
+  scale_y_log10() + 
+  scale_color_manual(values = c(viridis_pal[4],
+                                viridis_pal[10])) + 
+  xlab("Time") + ylab("Population size") + 
+  coord_cartesian(ylim = c(0.002, 1.1)) +
+  theme_classic() + 
+  theme(legend.position = "none",
+        #strip.text.x = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill = NA, linewidth = 0.75))
+
+p_inset <- long_ts %>%
+  ggplot() + 
+  aes(x = t, y = value, group = type, color = as.factor(type)) + 
+  geom_line() + 
+  scale_y_log10() + 
+  scale_x_continuous(breaks = c(992, 996, 1000)) + 
+  scale_color_manual(values = c(viridis_pal[4],
+                                viridis_pal[10])) + 
+  xlab("Time") + ylab("Population size") + 
+  coord_cartesian(xlim = c(992, 1000), ylim = c(0.06, 1.1)) +
+  theme_classic() + 
+  theme(legend.position = "none",
+        #strip.text.x = element_blank(),
+        axis.text=element_text(size = 8),
+        axis.title = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill = NA, linewidth = 0.75))
+
+p_comb <- ggdraw() +
+  draw_plot(p) +
+  draw_plot(p_inset, height = 0.4, width = 0.25, x = 0.25, y = 0.2)
+
+ggsave(filename = "./figures/si_invasion.png", plot = p_comb, device = "png", 
+       width = 6, height = 3, units = "in", dpi = 500)
+
+
+
+### Invasion of simple, chaotic food web by dormancy in continuous-time (Fig. S3)
 
 # Set up parameters for 3 spp food from Gilpin (1979) -- see also Robey et al. 2024
 
@@ -488,84 +776,8 @@ p <- df %>%
 #       width = 4, height = 3, units = "in", dpi = 400)
 
 
-##### SI figures #####
 
-### IGR as a function of alpha and m (for different choices of r) in the logistic model (Fig. S1)
-
-# calculations as in PIPs (Fig. 4)
-
-r_vec <- c(3.3, 3.5, 3.7, 3.9)
-
-# how many alpha and m values to test
-a_n <- 300
-m_n <- 300
-
-a_vec <- seq(0.001, 1, length.out = a_n)
-m_vec <- seq(0.001, 0.5, length.out = m_n)
-
-t_max <- 1000 # number of timesteps for numerical iteration
-t_inv <- t_max - 400 # timepoint at which to begin calculating IGR (allowing resident to reach steady state)
-
-df <- tibble(a = numeric(), 
-             r = numeric(), 
-             m = numeric(), 
-             IGR = numeric())
-
-for(r in r_vec){
-  
-  # iterate resident dynamics (always using resident with no dormancy)
-  ts <- general_dormancy_dynamics(r1 = r, a1 = 1, m1 = 0, 
-                                  x1_init = (r - 1)/r + 0.01, # start near equilibrium for fast convergence
-                                  x2_init = 0, t_max = t_max)
-  ts <- ts %>% pull(value)
-  ts <- ts[t_inv:t_max] # pull late values (after transient dynamics have elapsed)
-  
-  # find a time point such that net population change is minimized
-  end_pt <- which.min(abs(cumsum(log(r * (1 - ts)))))
-  x <- ts[2:(end_pt + 1)] # extract stationary sequence of time points
-  
-  for(i in 1:length(a_vec)){
-    
-    inv_a <- a_vec[i]
-    
-    for(j in 1:length(m_vec)){
-      
-      m <- m_vec[j]
-      
-      # calculate IGR over stationary resident dynamics
-      IGR <- (1 / length(x)) * sum(log(r * inv_a * (1 - x) + (1 - inv_a) * (1 - m))) 
-      df <- df %>% add_row(a = inv_a, r = r, m = m, IGR = IGR)
-    }
-  }
-}
-
-p <- df %>%
-  ggplot() + 
-  aes(x = a, y = m, 
-      fill = pmax(IGR, -0.1), color = pmax(IGR, -0.1)) + # color by log IGR, but truncate very small values for clearer visualization
-  geom_tile(linewidth = 0.1) + 
-  geom_line(data = df %>% filter(a < 1) %>% # indicate the threshold between positive and negative log IGR
-              group_by(r, a) %>% 
-              mutate(minIGR = min(abs(IGR))) %>% 
-              filter(IGR == minIGR), 
-            aes(x = a, y = m), color = "black") + 
-  scale_x_continuous(limits = c(0, 1), expand = c(0, 0),
-                     breaks = c(0.25, 0.5, 0.75, 1)) +
-  scale_y_continuous(limits = c(0, 0.5), expand = c(0, 0)) + 
-  facet_wrap(.~r,
-             labeller = labeller(r = function(x) paste0("r = ", x))) + 
-  theme_classic() + 
-  xlab("Invader active fraction") + ylab("Mortality in dormancy") + 
-  scale_fill_gradient2(high = viridis_pal[4], low = viridis_pal[10], 
-                       midpoint = 0, name = "log IGR") + 
-  scale_color_gradient2(high = viridis_pal[4], low = viridis_pal[10], 
-                       midpoint = 0, name = "log IGR")
-
-#ggsave(filename = "./figures/si_IGR_varying_m.png", plot = p, device = "png", 
-#       width = 6, height = 5, units = "in", dpi = 400)
-
-
-### Logistic model bifurcation diagram (Fig. S2)
+### Ricker model bifurcation diagram (Fig. S4)
 
 # As Fig. 2, but with Ricker density-dependence
 
@@ -666,7 +878,7 @@ p <- ggarrange(plotlist = list(pa, pb), nrow = 2, heights = c(0.5, 1),
 #       width = 4.5, height = 6, units = "in", dpi = 400)
 
 
-### Pairwise invasibility plots with Ricker density-dependence (Fig. S3) 
+### Pairwise invasibility plots with Ricker density-dependence (Fig. S5) 
 
 # after Fig. 4
 
@@ -712,7 +924,7 @@ for(r in r_vec){
       
       # find a time point such that net population change is minimized
       end_pt <- which.min(abs(cumsum(log(res_a * r * ricker_map(res_a * ts) + (1 - res_a) * (1 - m)))))
-      x <- ts[2:(end_pt + 1)] # extract stationary sequence of time points
+      x <- ts[1:(end_pt)] # extract stationary sequence of time points
       
       # where the resident population first begins to oscillate, record the bifurcation point
       if((ifelse(length(x) > 1, var(x), 0) > 10^-6) & !bif_flag){ 
